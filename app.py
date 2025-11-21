@@ -2,28 +2,27 @@ import streamlit as st
 import os
 import requests
 import re
-import json # Used for parsing complex error responses
+import json 
 
 # ----------------------------------------------------
 # GLOBAL CONFIGURATION
 # ----------------------------------------------------
-# FIX 1: Defined globally to fix NameError.
-# FIX 2: Switched to the suggested 'router' endpoint to resolve the 410 error.
+# This is the corrected API_URL format for the Hugging Face Router, 
+# which fixes the 404 error and is defined globally to fix the NameError.
 API_MODEL = "mistralai/Mistral-7B-Instruct-v0.2"
-API_URL = f"https://router.huggingface.co/models/{API_MODEL}" 
+API_URL = f"https://router.huggingface.co/{API_MODEL}" 
 # ----------------------------------------------------
 # CORE FUNCTIONS
 # ----------------------------------------------------
 
 def preprocess_question(question):
     """
-    Applies basic preprocessing: lowercase and punctuation removal (CLI Requirement).
+    Applies basic preprocessing: lowercase and punctuation removal.
     """
     # 1. Lowercase
     processed = question.lower()
     
-    # 2. Punctuation removal (Removes non-word characters except whitespace)
-    # This addresses the project's 'punctuation removal' requirement.
+    # 2. Punctuation removal
     processed = re.sub(r'[^\w\s]', '', processed)
     
     # 3. Remove extra whitespace and re-join
@@ -55,13 +54,12 @@ def query_llm(question, api_key):
             }
         }
         
-        # Call API with a timeout
+        # Call API
         response = requests.post(API_URL, headers=headers, json=payload, timeout=30)
         
         if response.status_code == 200:
             result = response.json()
             if isinstance(result, list) and len(result) > 0:
-                # Extract and clean up the generated text
                 answer = result[0].get('generated_text', 'No response generated').strip()
             else:
                 answer = "Error: Invalid response structure from API."
@@ -72,7 +70,7 @@ def query_llm(question, api_key):
             try:
                 # Try to parse the specific error message from the API response body
                 error_data = response.json()
-                error_message = error_data.get('error', response.text)
+                error_message = error_data.get('error', error_data.get('detail', response.text))
             except json.JSONDecodeError:
                 # Fallback to raw text if JSON parsing fails
                 error_message = response.text
@@ -98,7 +96,6 @@ st.markdown("---")
 # Sidebar for API key
 with st.sidebar:
     st.header("⚙️ Configuration")
-    # Tries to get the key from environment variable/Streamlit secrets first
     api_key = st.text_input("Enter HuggingFace API Key", 
                             type="password", 
                             value=os.getenv("HUGGINGFACE_API_KEY", ""),
@@ -134,7 +131,6 @@ if ask_button:
     elif not user_question.strip():
         st.error("⚠️ Please enter a question!")
     else:
-        # Clear previous info and results
         processing_placeholder.empty()
         result_container.empty()
         
@@ -157,7 +153,6 @@ if ask_button:
             with result_container:
                 st.subheader("💡 Answer (LLM API Response)")
                 
-                # Check for errors before displaying the final answer
                 if answer.startswith("API Error") or answer.startswith("Connection Error") or answer.startswith("An unexpected error occurred:"):
                     st.error(answer)
                 else:
@@ -170,7 +165,7 @@ if ask_button:
                         "processed_question": processed_question,
                         "token_count": len(tokens),
                         "model": API_MODEL, 
-                        "api_url_used": API_URL 
+                        "api_url_used": API_URL
                     })
 
 # Footer
