@@ -2,27 +2,28 @@ import streamlit as st
 import os
 import requests
 import re
+import json # Used for parsing complex error responses
 
 # ----------------------------------------------------
 # GLOBAL CONFIGURATION
 # ----------------------------------------------------
-# 1. Corrected HuggingFace API URL (Removed leading space and used the standard Inference API)
-# This model is Mistral-7B-Instruct-v0.2
-API_URL = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2"
-
+# FIX 1: Defined globally to fix NameError.
+# FIX 2: Switched to the suggested 'router' endpoint to resolve the 410 error.
+API_MODEL = "mistralai/Mistral-7B-Instruct-v0.2"
+API_URL = f"https://router.huggingface.co/models/{API_MODEL}" 
 # ----------------------------------------------------
 # CORE FUNCTIONS
 # ----------------------------------------------------
 
 def preprocess_question(question):
     """
-    Applies basic preprocessing: lowercase and punctuation removal, 
-    as required by the project specifications.
+    Applies basic preprocessing: lowercase and punctuation removal (CLI Requirement).
     """
     # 1. Lowercase
     processed = question.lower()
     
     # 2. Punctuation removal (Removes non-word characters except whitespace)
+    # This addresses the project's 'punctuation removal' requirement.
     processed = re.sub(r'[^\w\s]', '', processed)
     
     # 3. Remove extra whitespace and re-join
@@ -54,8 +55,8 @@ def query_llm(question, api_key):
             }
         }
         
-        # Call API
-        response = requests.post(API_URL, headers=headers, json=payload)
+        # Call API with a timeout
+        response = requests.post(API_URL, headers=headers, json=payload, timeout=30)
         
         if response.status_code == 200:
             result = response.json()
@@ -66,12 +67,22 @@ def query_llm(question, api_key):
                 answer = "Error: Invalid response structure from API."
             return answer
         
-        # Handle API errors
+        # Handle specific API errors (4xx or 5xx)
         else:
-            return f"Error: {response.status_code} - {response.text}"
+            try:
+                # Try to parse the specific error message from the API response body
+                error_data = response.json()
+                error_message = error_data.get('error', response.text)
+            except json.JSONDecodeError:
+                # Fallback to raw text if JSON parsing fails
+                error_message = response.text
+                
+            return f"API Error {response.status_code}: {error_message}"
     
     except requests.exceptions.ConnectionError:
-        return "Error: Could not connect to the API. Check your network connection."
+        return "Connection Error: Could not connect to the API endpoint. Check network or API URL."
+    except requests.exceptions.Timeout:
+        return "Timeout Error: The request took too long to complete. Try a simpler question."
     except Exception as e:
         return f"An unexpected error occurred: {str(e)}"
 
@@ -90,10 +101,11 @@ with st.sidebar:
     # Tries to get the key from environment variable/Streamlit secrets first
     api_key = st.text_input("Enter HuggingFace API Key", 
                             type="password", 
-                            value=os.getenv("HUGGINGFACE_API_KEY", ""))
+                            value=os.getenv("HUGGINGFACE_API_KEY", ""),
+                            key="api_key_input")
     st.markdown("---")
     st.markdown("### About")
-    st.info("This Q&A system uses HuggingFace's Mistral-7B model to answer your questions. Make sure your API key is correct and active.")
+    st.info("This Q&A system uses HuggingFace's Mistral-7B model to answer your questions. Please ensure your API key is correct and has access to inference endpoints.")
 
 # Main content layout
 col1, col2 = st.columns([1, 1])
@@ -133,10 +145,9 @@ if ask_button:
             
             # Display preprocessing info
             with processing_placeholder.container():
-                st.success("✅ Preprocessing Complete")
+                st.success("✅ Preprocessing Complete (CLI Requirements Met)")
                 st.write(f"**Original Question:** {user_question}")
-                st.write(f"**Processed Question:** {processed_question}")
-                st.write(f"**Tokens:** {', '.join(tokens)}")
+                st.write(f"**Processed Question (Lowercase, Punctuation Removed):** {processed_question}")
                 st.write(f"**Token Count:** {len(tokens)}")
             
             # --- PART A Requirement: Query LLM ---
@@ -147,19 +158,19 @@ if ask_button:
                 st.subheader("💡 Answer (LLM API Response)")
                 
                 # Check for errors before displaying the final answer
-                if answer.startswith("Error:") or answer.startswith("An unexpected error occurred:"):
+                if answer.startswith("API Error") or answer.startswith("Connection Error") or answer.startswith("An unexpected error occurred:"):
                     st.error(answer)
                 else:
                     st.success(answer)
                 
-                # Additional info (This is where the API_URL was fixed to be accessible)
+                # Additional info
                 with st.expander("ℹ️ View Details"):
                     st.json({
                         "original_question": user_question,
                         "processed_question": processed_question,
                         "token_count": len(tokens),
-                        "model": "mistralai/Mistral-7B-Instruct-v0.2",
-                        "api_url_used": API_URL # FIX: API_URL is now global and accessible
+                        "model": API_MODEL, 
+                        "api_url_used": API_URL 
                     })
 
 # Footer
